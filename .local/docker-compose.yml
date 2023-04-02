@@ -1,0 +1,26 @@
+version: "3.8"
+services:
+
+  mysql:
+    image: mysql:8.0.31
+    container_name: mysql_quickstart
+    platform: linux/x86_64
+    healthcheck:
+      test: [ "CMD", "mysqladmin" ,"ping", "-h", "localhost" ]
+      timeout: 20s
+      retries: 10
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "true"
+      MYSQL_DATABASE: "quickstart"
+    ports:
+      - "3306:3306"
+
+  wiremock:
+    image: wiremock/wiremock
+    container_name: wiremock_quickstart
+    platform: linux/x86_64
+    command: "--global-response-templating --print-all-network-traffic"
+    volumes:
+      - $PWD/wiremock:/home/wiremock
+    ports:
+      - "7771:8080"

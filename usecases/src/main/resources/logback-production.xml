@@ -1,0 +1,56 @@
+<configuration>
+    <appender name="stdout" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+            <providers>
+                <timestamp>
+                    <fieldName>timestamp_app</fieldName>
+                    <timeZone>UTC</timeZone>
+                    <pattern>yyyy-MM-dd'T'HH:mm:ss.SSSZ</pattern>
+                </timestamp>
+
+                <version>
+                    <fieldName>version</fieldName>
+                </version>
+
+                <message>
+                    <fieldName>message</fieldName>
+                </message>
+
+                <loggerName>
+                    <fieldName>logger</fieldName>
+                </loggerName>
+
+                <threadName>
+                    <fieldName>thread</fieldName>
+                </threadName>
+
+                <logLevel>
+                    <fieldName>log_level</fieldName>
+                </logLevel>
+
+                <stackTrace>
+                    <fieldName>stackTrace</fieldName>
+                </stackTrace>
+
+                <context />
+                <mdc />
+
+                <!-- provides the fields in the configured pattern -->
+                <pattern>
+                    <omitEmptyFields>true</omitEmptyFields>
+                    <!-- the pattern that defines what to include -->
+                    <pattern>
+                        {
+                            "log_type": "APPLICATION",
+                            "logService": "open_search"
+                        }
+                    </pattern>
+                </pattern>
+            </providers>
+        </encoder>
+    </appender>
+
+    <root level="info">
+        <appender-ref ref="stdout"/>
+    </root>
+</configuration>

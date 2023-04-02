@@ -1,0 +1,7 @@
+FROM gradle:7.5.1-jdk17
+
+COPY ./ /home/gradle/project
+
+WORKDIR /home/gradle/project
+
+CMD ["gradle", "-Dorg.gradle.daemon=false", "clean", "check", "jacocoTestReport"]
