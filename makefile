@@ -10,4 +10,8 @@ extract:
 	echo "extract new build"
 	tar -xf ./application/build/distributions/application-1.0.tar
 
+build-image:
+	docker build -t myapp .
+
 run: clean build-project extract
+run-build-image: run build-image

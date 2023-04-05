@@ -1,6 +1,5 @@
 package com.picpay.quickstart.circuitbreaker
 
-import br.com.guiabolso.events.exception.EventValidationException
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException
 import io.github.resilience4j.circuitbreaker.CircuitBreaker
 import org.springframework.beans.factory.annotation.Qualifier
@@ -25,7 +24,7 @@ class CircuitBreakerService(
     fun execute(throwException: Boolean) = circuitBreakerDefault.execute {
         println("Executed by default circuit")
         if (throwException) {
-            throw EventValidationException("Some exception")
+            throw IgnoredException()
         }
 
         OutputCircuitBreaker("Success")
@@ -34,7 +33,7 @@ class CircuitBreakerService(
     fun executeCache(throwException: Boolean) = circuitBreakerCache.execute {
         println("Executed by cached circuit")
         if (throwException) {
-            throw EventValidationException("Some exception")
+            throw IgnoredException()
         }
 
         OutputCircuitBreaker("Success")

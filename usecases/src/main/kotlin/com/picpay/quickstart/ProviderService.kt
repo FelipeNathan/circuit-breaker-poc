@@ -10,8 +10,9 @@ class ProviderService {
         "\n=== CALL EVENT TO DISABLE PROVIDER === "
     )
 
-    fun enable() =
-        log.info("=== CALL EVENT TO ENABLE PROVIDER JUST TO TEST, DO NOT CLOSE CIRCUIT BREAKER YET ===")
+    fun enable() = log.info(
+        "\n=== CALL EVENT TO ENABLE PROVIDER ==="
+    )
 
     companion object {
         val log = LoggerFactory.getLogger(ProviderService::class.java)

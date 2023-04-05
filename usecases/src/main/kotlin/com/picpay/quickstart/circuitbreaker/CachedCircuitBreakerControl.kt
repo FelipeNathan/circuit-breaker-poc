@@ -1,34 +1,43 @@
 package com.picpay.quickstart.circuitbreaker
 
 import com.picpay.quickstart.ProviderService
+import com.picpay.quickstart.config.propertiesconfig.ConfigService
 import io.github.resilience4j.circuitbreaker.CircuitBreaker
-import java.util.concurrent.Executors
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Component
 import redis.clients.jedis.JedisPooled
 import redis.clients.jedis.JedisPubSub
+import java.util.concurrent.Executors
 
 @Component
 class CachedCircuitBreakerControl(
     @Qualifier("circuitBreakerCached")
     val circuitBreakerCached: CircuitBreaker,
-    val providerService: ProviderService
+    val providerService: ProviderService,
+    val configService: ConfigService
 ) {
 
     final val redisPool: JedisPooled by lazy {
-        JedisPooled(REDIS_URL, REDIS_PORT)
+        JedisPooled(
+            configService.getRequiredString("redis.url"),
+            configService.getRequiredInt("redis.port")
+        )
     }
 
     init {
+
         circuitBreakerCached.eventPublisher.onStateTransition {
 
             when (it.stateTransition) {
-                CircuitBreaker.StateTransition.CLOSED_TO_OPEN -> openCircuit()
+                CircuitBreaker.StateTransition.CLOSED_TO_OPEN -> disableProviderAndNotifyOpenState()
                 CircuitBreaker.StateTransition.OPEN_TO_HALF_OPEN -> providerService.enable()
-                CircuitBreaker.StateTransition.HALF_OPEN_TO_CLOSED -> closeCircuit()
+                CircuitBreaker.StateTransition.HALF_OPEN_TO_CLOSED -> enableProviderAndNotifyClosedState()
+                CircuitBreaker.StateTransition.CLOSED_TO_FORCED_OPEN -> circuitBreakerCached.transitionToOpenState()
 
-                else -> log.info("The ignored transition: ${it.stateTransition}")
+                // Precisa verificar se existe outra transição que deveria ser validada
+                // Ou se precisaria validar apenas pra qual estado está INDO sem precisar ver de qual estado está VINDO
+                else -> log.info("The ignored state transition: ${it.stateTransition}")
             }
         }
 
@@ -40,12 +49,12 @@ class CachedCircuitBreakerControl(
         }
     }
 
-    private fun openCircuit() {
+    private fun disableProviderAndNotifyOpenState() {
         providerService.disable()
         publishAndCacheState(CircuitBreaker.State.OPEN)
     }
 
-    private fun closeCircuit() {
+    private fun enableProviderAndNotifyClosedState() {
         providerService.enable()
         publishAndCacheState(CircuitBreaker.State.CLOSED)
     }
@@ -53,12 +62,12 @@ class CachedCircuitBreakerControl(
     private fun publishAndCacheState(state: CircuitBreaker.State) {
         log.info("=== PUBLISH CIRCUIT BREAKER STATE TO PODS FORCE $state ===")
         redisPool.publish(CIRCUIT_BREAKER_CHANNEL, state.name)
+
+        log.info("=== PUBLISH CIRCUIT BREAKER STATE TO CACHE TO KEEP IT STATEFUL ===")
         redisPool.set(CIRCUIT_BREAKER_CHANNEL, state.name)
     }
 
     companion object {
-        const val REDIS_URL = "localhost"
-        const val REDIS_PORT = 6379
         const val CIRCUIT_BREAKER_CHANNEL = "circuit_breaker_state"
         val log = LoggerFactory.getLogger(CachedCircuitBreakerControl::class.java)
     }

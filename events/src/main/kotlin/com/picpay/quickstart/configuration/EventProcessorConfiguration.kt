@@ -8,6 +8,7 @@ import br.com.guiabolso.events.server.handler.EventHandler
 import br.com.guiabolso.events.server.handler.EventHandlerDiscovery
 import br.com.guiabolso.events.server.handler.SimpleEventHandlerRegistry
 import com.google.gson.GsonBuilder
+import com.picpay.quickstart.circuitbreaker.IgnoredException
 import com.picpay.quickstart.misc.tracing.Tracer
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -21,7 +22,9 @@ class EventProcessorConfiguration {
     }
 
     @Bean
-    fun eventExceptionHandlerRegistry() = exceptionHandler()
+    fun eventExceptionHandlerRegistry() = exceptionHandler().apply {
+        register(IgnoredException::class.java, IgnoredExceptionHandler)
+    }
 
     @Bean
     fun eventProcessor(

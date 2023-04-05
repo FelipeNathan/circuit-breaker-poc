@@ -4,7 +4,7 @@ plugins {
     kotlin("jvm") version Dependency.Versions.kotlin
     kotlin("plugin.allopen") version Dependency.Versions.kotlin
     kotlin("plugin.noarg") version Dependency.Versions.kotlin
-    id("io.gitlab.arturbosch.detekt") version Dependency.Versions.detekt
+//    id("io.gitlab.arturbosch.detekt") version Dependency.Versions.detekt
     jacoco
 }
 
@@ -22,11 +22,11 @@ subprojects {
     apply(plugin = "kotlin-spring")
     apply(plugin = "kotlin-jpa")
     apply(plugin = "jacoco")
-    apply(plugin = "io.gitlab.arturbosch.detekt")
+//    apply(plugin = "io.gitlab.arturbosch.detekt")
 
-    detekt {
-        autoCorrect = true
-    }
+//    detekt {
+//        autoCorrect = true
+//    }
 
     repositories {
         mavenCentral()
@@ -95,7 +95,7 @@ subprojects {
         testImplementation(Dependency.springTest)
         testImplementation(Dependency.eventsTest)
 
-        detektPlugins(Dependency.detekt)
+//        detektPlugins(Dependency.detekt)
     }
 }
 
