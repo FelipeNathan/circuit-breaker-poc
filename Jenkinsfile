@@ -2,7 +2,7 @@
 if (env.BRANCH_NAME == "master") {
     ciKubernetesDeploy {
         serviceNamespace = "<replace_space_name_here>"
-        jobName = "pp-ms-quick-start"
+        jobName = "circuit-breaker-poc"
         betaFeatures = [
             obk: true
         ]
@@ -20,7 +20,7 @@ if (env.BRANCH_NAME == "master") {
 if (env.BRANCH_NAME == "hml") {
     ciKubernetesDeploy {
         serviceNamespace = "<replace_space_name_here>"
-        jobName = "pp-ms-quick-start"
+        jobName = "circuit-breaker-poc"
         betaFeatures = [
             obk: true
         ]
@@ -39,7 +39,7 @@ if (env.BRANCH_NAME == "hml") {
 if (env.CHANGE_ID) {
     ciRunTests {
         serviceNamespace = "<replace_space_name_here>"
-        jobName = "pp-ms-quick-start"
+        jobName = "circuit-breaker-poc"
         cacheVolumes = [
             'Dockerfile-tests': [
                 'gradle': '/home/gradle/.gradle'

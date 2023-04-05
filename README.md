@@ -1,4 +1,4 @@
-# pp-ms-quick-start
+# circuit-breaker-poc
 
 Para iniciar um novo projeto a partir deste quick-start é necessário:
 

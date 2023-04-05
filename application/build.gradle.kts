@@ -15,6 +15,6 @@ application {
 
 dependencies {
     implementation(project(":usecases"))
-    implementation(project(":persistence"))
+//    implementation(project(":persistence"))
     implementation(project(":http-api"))
 }
