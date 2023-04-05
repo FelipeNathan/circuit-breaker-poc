@@ -1,19 +1,19 @@
 package com.picpay.quickstart.circuitbreaker
 
+import br.com.guiabolso.events.json.MapperHolder
 import com.picpay.quickstart.ProviderService
+import com.picpay.quickstart.circuitbreaker.CachedCircuitBreakerControl.Companion.CIRCUIT_BREAKER_METADATA_PREFIX
 import com.picpay.quickstart.config.propertiesconfig.ConfigService
 import io.github.resilience4j.circuitbreaker.CircuitBreaker
 import java.util.concurrent.Executors
 import org.slf4j.LoggerFactory
-import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Component
 import redis.clients.jedis.JedisPooled
 import redis.clients.jedis.JedisPubSub
 
 @Component
 class CachedCircuitBreakerControl(
-    @Qualifier("circuitBreakerCached")
-    val circuitBreakerCached: CircuitBreaker,
+    val circuits: Map<String, CircuitBreaker>,
     val providerService: ProviderService,
     val configService: ConfigService
 ) {
@@ -33,54 +33,62 @@ class CachedCircuitBreakerControl(
     }
 
     init {
+        subscribeToChanges()
+        circuits.forEach { _, circuit ->
+            circuit.subscribeOnCircuitError()
+            circuit.subscribeOnCircuitSuccess()
+            circuit.subscribeOnStateTransition()
+        }
+    }
 
+    private fun subscribeToChanges() {
         Executors.newSingleThreadExecutor().execute {
             redisSubscriberPool.subscribe(
                 Subscription(),
                 CIRCUIT_BREAKER_CHANNEL
             )
         }
+    }
 
-        circuitBreakerCached.eventPublisher.onError {
-            val errors = redisPool.incr(ERROR_BUCKET)
-            val success = redisPool.get(SUCCESS_BUCKET)?.toLong() ?: 0
-            val errorRate = errors.calculateErrorRate(success)
+    private fun CircuitBreaker.subscribeOnCircuitError() {
+        eventPublisher.onError {
+            val requests = redisPool.fetchMetadataFor(this).updateRequestAndPush(false)
 
-            log.info("onError: errors=$errors, success=$success, errorRate=$errorRate = " +
-                "threshold >= ${circuitBreakerCached.circuitBreakerConfig.failureRateThreshold}")
+            val errorRate = requests.calculateErrorRate()
+            log.info("onError: metadata=$requests, errorRate=$errorRate" +
+                "threshold >= ${circuitBreakerConfig.failureRateThreshold}")
 
-            if (errorRate >= circuitBreakerCached.circuitBreakerConfig.failureRateThreshold) {
-                redisPool.publish(CIRCUIT_BREAKER_CHANNEL, "update state")
+            if (errorRate >= circuitBreakerConfig.failureRateThreshold) {
+                redisPool.publish(CIRCUIT_BREAKER_CHANNEL, this.name)
             }
         }
+    }
 
-        circuitBreakerCached.eventPublisher.onSuccess {
-            val success = redisPool.incr(SUCCESS_BUCKET)
-            val errors = redisPool.get(ERROR_BUCKET)?.toLong() ?: 0
+    private fun CircuitBreaker.subscribeOnCircuitSuccess() {
+        eventPublisher.onSuccess {
+            val requests = redisPool.fetchMetadataFor(this).updateRequestAndPush(true)
 
-            log.info("onSuccess: ${circuitBreakerCached.state}")
-            if (circuitBreakerCached.state != CircuitBreaker.State.CLOSED) {
-                val errorRate = errors.calculateErrorRate(success)
+            if (state != CircuitBreaker.State.CLOSED) {
+                val errorRate = requests.calculateErrorRate()
+                log.info("onSuccess: metadata=$requests, errorRate=$errorRate" +
+                    "threshold >= ${circuitBreakerConfig.failureRateThreshold}")
 
-                log.info("onSuccess: errors=$errors, success=$success, errorRate=$errorRate = " +
-                    "threshold >= ${circuitBreakerCached.circuitBreakerConfig.failureRateThreshold}")
-
-                if (errorRate < circuitBreakerCached.circuitBreakerConfig.failureRateThreshold) {
-                    redisPool.del(SUCCESS_BUCKET)
-                    redisPool.del(ERROR_BUCKET)
-                    redisPool.publish(CIRCUIT_BREAKER_CHANNEL, "update state")
+                if (errorRate < circuitBreakerConfig.failureRateThreshold) {
+                    redisPool.publish(CIRCUIT_BREAKER_CHANNEL, this.name)
                 }
             }
         }
+    }
 
-        circuitBreakerCached.eventPublisher.onStateTransition {
+    private fun CircuitBreaker.subscribeOnStateTransition() {
+        eventPublisher.onStateTransition {
 
             when (it.stateTransition) {
-                CircuitBreaker.StateTransition.CLOSED_TO_FORCED_OPEN -> circuitBreakerCached.transitionToOpenState()
-                CircuitBreaker.StateTransition.CLOSED_TO_OPEN -> disableProviderAndSaveState()
-                CircuitBreaker.StateTransition.OPEN_TO_HALF_OPEN -> providerService.enable()
-                CircuitBreaker.StateTransition.HALF_OPEN_TO_OPEN -> providerService.disable()
-                CircuitBreaker.StateTransition.HALF_OPEN_TO_CLOSED -> enableProviderAndSaveState()
+                CircuitBreaker.StateTransition.CLOSED_TO_FORCED_OPEN -> this.transitionToOpenState()
+                CircuitBreaker.StateTransition.CLOSED_TO_OPEN -> disableProviderAndSaveState(this)
+                CircuitBreaker.StateTransition.OPEN_TO_HALF_OPEN -> providerService.enable(name)
+                CircuitBreaker.StateTransition.HALF_OPEN_TO_OPEN -> providerService.disable(name)
+                CircuitBreaker.StateTransition.HALF_OPEN_TO_CLOSED -> enableProviderAndSaveState(this)
 
                 // Precisa verificar se existe outra transição que deveria ser validada
                 // Ou se precisaria validar apenas pra qual estado está INDO sem precisar ver de qual estado está VINDO
@@ -89,39 +97,43 @@ class CachedCircuitBreakerControl(
         }
     }
 
-    private fun disableProviderAndSaveState() {
-        providerService.disable()
-        cacheState(CircuitBreaker.State.OPEN)
+    private fun disableProviderAndSaveState(circuitBreaker: CircuitBreaker) {
+        providerService.disable(circuitBreaker.name)
+        cacheState(circuitBreaker)
     }
 
-    private fun enableProviderAndSaveState() {
-        providerService.enable()
-        cacheState(CircuitBreaker.State.CLOSED)
+    private fun enableProviderAndSaveState(circuitBreaker: CircuitBreaker) {
+        providerService.enable(circuitBreaker.name)
+        cacheState(circuitBreaker)
     }
 
-    private fun cacheState(state: CircuitBreaker.State) {
+    private fun cacheState(circuitBreaker: CircuitBreaker) {
         log.info("=== PUBLISH CIRCUIT BREAKER STATE TO CACHE TO KEEP IT STATEFUL ===")
-        redisPool.set(CIRCUIT_BREAKER_CHANNEL, state.name)
+        redisPool.fetchMetadataFor(circuitBreaker).updateRequestAndPush(false)
     }
+
+    private fun JedisPooled.fetchMetadataFor(circuitBreaker: CircuitBreaker) =
+        get(circuitBreaker.cacheKeyName).asRequestMetadata(circuitBreaker)
+
+    private fun CircuitBreakeCachedMetadata.updateRequestAndPush(success: Boolean) =
+        apply { update(success) }.also { redisPool.set(cacheKeyName, it.toJson()) }
+
+    private fun CircuitBreakeCachedMetadata.updateStateAndPush(state: CircuitBreaker.State) =
+        apply { this.state = state }.also { redisPool.set(cacheKeyName, it.toJson()) }
 
     private fun CircuitBreaker.errorRateReachedLimit(): Boolean {
-        val failuredThreshold = circuitBreakerCached.circuitBreakerConfig.failureRateThreshold
-        val success = redisPool.get(SUCCESS_BUCKET)?.toLong() ?: 0
-        val errors = redisPool.get(ERROR_BUCKET)?.toLong() ?: 0
-        val errorRate = errors.calculateErrorRate(success)
+        val failuredThreshold = circuitBreakerConfig.failureRateThreshold
+        val requests = redisPool.fetchMetadataFor(this)
 
-        log.info("Shared result: errors=$errors, success=$success, errorRate=$errorRate = " +
-            "threshold >= ${circuitBreakerCached.circuitBreakerConfig.failureRateThreshold}")
+        val errorRate = requests.calculateErrorRate()
+
+        log.info("shared result: metadata=$requests, errorRate=$errorRate, threshold >= ${failuredThreshold}")
         return errorRate >= failuredThreshold
     }
 
-    private fun Long.calculateErrorRate(success: Long) = (this.toDouble() / (this + success.toDouble())) * 100
-
     companion object {
         const val CIRCUIT_BREAKER_CHANNEL = "circuit_breaker_state"
-        const val SUCCESS_BUCKET = "circuit_breaker_success"
-        const val ERROR_BUCKET = "circuit_breaker_error"
-
+        const val CIRCUIT_BREAKER_METADATA_PREFIX = "circuit_breaker_metadata"
         val log = LoggerFactory.getLogger(CachedCircuitBreakerControl::class.java)
     }
 
@@ -132,21 +144,41 @@ class CachedCircuitBreakerControl(
                 this.ping()
             }
 
-            if (circuitBreakerCached.errorRateReachedLimit()) {
+            val circuit = circuits[message] ?: return
+            if (circuit.isClosed() && circuit.errorRateReachedLimit()) {
                 log.info("=== CIRCUIT BREAKER IS NOW OPEN ===")
-                circuitBreakerCached.transitionToForcedOpenState()
+                circuit.transitionToForcedOpenState()
             } else {
                 log.info("=== CIRCUIT BREAKER IS NOW CLOSED ===")
-                circuitBreakerCached.transitionToClosedState()
+                circuit.transitionToClosedState()
             }
         }
 
         override fun onSubscribe(channel: String, subscribedChannels: Int) {
-            val state = redisPool.get(CIRCUIT_BREAKER_CHANNEL) ?: return
 
-            if (state == CircuitBreaker.State.OPEN.name) {
-                circuitBreakerCached.transitionToForcedOpenState()
+            if (channel != CIRCUIT_BREAKER_CHANNEL) return
+
+            circuits.forEach { _, circuit ->
+                val metadata = redisPool.fetchMetadataFor(circuit)
+
+                if (metadata.state == CircuitBreaker.State.OPEN) {
+                    circuit.transitionToForcedOpenState()
+                }
             }
         }
     }
 }
+
+fun CircuitBreaker.isClosed() = state == CircuitBreaker.State.CLOSED
+
+val CircuitBreaker.cacheKeyName get() = "${CIRCUIT_BREAKER_METADATA_PREFIX}_${name}"
+
+fun String?.asRequestMetadata(circuitBreaker: CircuitBreaker): CircuitBreakeCachedMetadata {
+    return if (this == null) CircuitBreakeCachedMetadata(
+        maxSize = circuitBreaker.circuitBreakerConfig.slidingWindowSize,
+        cacheKeyName = circuitBreaker.cacheKeyName
+    )
+    else MapperHolder.mapper.fromJson(this, CircuitBreakeCachedMetadata::class.java)
+}
+
+fun CircuitBreakeCachedMetadata.toJson(): String = MapperHolder.mapper.toJson(this)

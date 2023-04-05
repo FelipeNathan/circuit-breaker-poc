@@ -2,15 +2,11 @@ package com.picpay.quickstart.circuitbreaker
 
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException
 import io.github.resilience4j.circuitbreaker.CircuitBreaker
-import org.springframework.beans.factory.annotation.Qualifier
 import org.springframework.stereotype.Service
 
 @Service
 class CircuitBreakerService(
-    @Qualifier("circuitBreakerDefault")
-    private val circuitBreakerDefault: CircuitBreaker,
-    @Qualifier("circuitBreakerCached")
-    private val circuitBreakerCache: CircuitBreaker
+    private val circuits: Map<String, CircuitBreaker>
 ) {
 
     private fun CircuitBreaker.execute(block: () -> OutputCircuitBreaker?): OutputCircuitBreaker? {
@@ -21,22 +17,17 @@ class CircuitBreakerService(
         }
     }
 
-    fun execute(throwException: Boolean) = circuitBreakerDefault.execute {
-        println("Executed by default circuit")
-        if (throwException) {
-            throw IgnoredException()
+    fun execute(origin: String?, throwException: Boolean): OutputCircuitBreaker? {
+        val circuit = circuits[origin] ?: circuits["Default"]!!
+
+        return circuit.execute {
+            println("Executed by ${circuit.name} circuit")
+            if (throwException) {
+                throw IgnoredException()
+            }
+
+            OutputCircuitBreaker("Success")
         }
-
-        OutputCircuitBreaker("Success")
-    }
-
-    fun executeCache(throwException: Boolean) = circuitBreakerCache.execute {
-        println("Executed by cached circuit")
-        if (throwException) {
-            throw IgnoredException()
-        }
-
-        OutputCircuitBreaker("Success")
     }
 
     data class OutputCircuitBreaker(

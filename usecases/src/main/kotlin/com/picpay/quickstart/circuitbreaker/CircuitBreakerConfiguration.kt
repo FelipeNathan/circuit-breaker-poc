@@ -2,11 +2,10 @@ package com.picpay.quickstart.circuitbreaker
 
 import io.github.resilience4j.circuitbreaker.CircuitBreaker
 import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig
-import org.springframework.context.annotation.Bean
-import org.springframework.context.annotation.Configuration
-import org.springframework.context.annotation.Primary
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.toJavaDuration
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
 
 @Configuration
 class CircuitBreakerConfiguration {
@@ -18,21 +17,11 @@ class CircuitBreakerConfiguration {
         .waitDurationInOpenState(30.seconds.toJavaDuration())
         .build()
 
-    @Primary
-    @Bean("circuitBreakerDefault")
-    fun circuitBreakerDefault(config: CircuitBreakerConfig) = CircuitBreaker.of("default", config).apply {
-        eventPublisher.onStateTransition {
-            if (it.stateTransition.toState == CircuitBreaker.State.OPEN) {
-                println("=== call event to disable provider ===")
-            }
-
-            if (it.stateTransition.toState == CircuitBreaker.State.HALF_OPEN) {
-                println("=== call event to enable provider ===")
-                this.transitionToClosedState()
-            }
-        }
+    @Bean
+    fun circuitBreakerCached(config: CircuitBreakerConfig): Map<String, CircuitBreaker> {
+        val circuits = Origin.values().map {
+            CircuitBreaker.of(it.name, config)
+        } + CircuitBreaker.of("Default", config)
+        return circuits.associateBy { it.name }
     }
-
-    @Bean("circuitBreakerCached")
-    fun circuitBreakerCached(config: CircuitBreakerConfig) = CircuitBreaker.of("cached", config)
 }

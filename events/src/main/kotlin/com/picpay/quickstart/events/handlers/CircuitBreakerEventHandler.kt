@@ -16,12 +16,9 @@ class CircuitBreakerEventHandler(
 
     override suspend fun handle(event: RequestEvent): ResponseEvent {
         val input = event.payloadAs<InputCircuitBreaker>()
+        val origin = event.origin
 
-        val response = if (input.isCached) {
-            circuitBreakerService.executeCache(input.throwException)
-        } else {
-            circuitBreakerService.execute(input.throwException)
-        }
+        val response = circuitBreakerService.execute(origin, input.throwException)
 
         return EventBuilder.responseFor(event) {
             payload = response
@@ -30,6 +27,5 @@ class CircuitBreakerEventHandler(
 
     data class InputCircuitBreaker(
         val throwException: Boolean,
-        val isCached: Boolean
     )
 }
