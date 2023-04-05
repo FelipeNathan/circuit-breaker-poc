@@ -13,8 +13,7 @@ class CircuitBreakerConfiguration {
 
     @Bean
     fun circuitBreakerConfig() = CircuitBreakerConfig.custom()
-        .slidingWindowSize(2)
-        .minimumNumberOfCalls(2)
+        .slidingWindowSize(4)
         .enableAutomaticTransitionFromOpenToHalfOpen()
         .waitDurationInOpenState(30.seconds.toJavaDuration())
         .build()
