@@ -10,10 +10,10 @@ import redis.clients.jedis.JedisPooled
 import redis.clients.jedis.JedisPubSub
 
 @Component
-class CachedCircuitBreakerComponent(
+class CachedCircuitBreakerControl(
     @Qualifier("circuitBreakerCached")
-    circuitBreakerCached: CircuitBreaker,
-    providerService: ProviderService
+    val circuitBreakerCached: CircuitBreaker,
+    val providerService: ProviderService
 ) {
 
     final val redisPool: JedisPooled by lazy {
@@ -24,58 +24,63 @@ class CachedCircuitBreakerComponent(
         circuitBreakerCached.eventPublisher.onStateTransition {
 
             when (it.stateTransition) {
-                CircuitBreaker.StateTransition.CLOSED_TO_OPEN -> {
-                    providerService.disable()
-                    publishState(it.stateTransition.toState)
-                }
-
+                CircuitBreaker.StateTransition.CLOSED_TO_OPEN -> openCircuit()
                 CircuitBreaker.StateTransition.OPEN_TO_HALF_OPEN -> providerService.enable()
+                CircuitBreaker.StateTransition.HALF_OPEN_TO_CLOSED -> closeCircuit()
 
-                CircuitBreaker.StateTransition.HALF_OPEN_TO_CLOSED -> {
-                    providerService.enable()
-                    publishState(it.stateTransition.toState)
-                }
-
-                else -> {
-                    log.info("The ignored transition: ${it.stateTransition}")
-                }
+                else -> log.info("The ignored transition: ${it.stateTransition}")
             }
         }
 
         Executors.newSingleThreadExecutor().execute {
             redisPool.subscribe(
-                Subscription(circuitBreakerCached),
+                Subscription(),
                 CIRCUIT_BREAKER_CHANNEL
             )
         }
     }
 
-    private fun publishState(state: CircuitBreaker.State) {
+    private fun openCircuit() {
+        providerService.disable()
+        publishAndCacheState(CircuitBreaker.State.OPEN)
+    }
+
+    private fun closeCircuit() {
+        providerService.enable()
+        publishAndCacheState(CircuitBreaker.State.CLOSED)
+    }
+
+    private fun publishAndCacheState(state: CircuitBreaker.State) {
         log.info("=== PUBLISH CIRCUIT BREAKER STATE TO PODS FORCE $state ===")
         redisPool.publish(CIRCUIT_BREAKER_CHANNEL, state.name)
+        redisPool.set(CIRCUIT_BREAKER_CHANNEL, state.name)
     }
 
     companion object {
         const val REDIS_URL = "localhost"
         const val REDIS_PORT = 6379
         const val CIRCUIT_BREAKER_CHANNEL = "circuit_breaker_state"
-        val log = LoggerFactory.getLogger(CachedCircuitBreakerComponent::class.java)
+        val log = LoggerFactory.getLogger(CachedCircuitBreakerControl::class.java)
     }
 
-    class Subscription(private val circuitBreakerCached: CircuitBreaker) : JedisPubSub() {
+    inner class Subscription : JedisPubSub() {
         override fun onMessage(channel: String, message: String) {
+            log.info("$channel $message")
             if (message == "ping") {
                 this.ping()
             }
 
-            val state = CircuitBreaker.State.valueOf(message)
+            val state = try {
+                CircuitBreaker.State.valueOf(message)
+            } catch (ignored: Exception) {
+                return
+            }
 
-            log.info("$channel $message")
             if (circuitBreakerCached.state == state) {
                 return
             }
 
-            when (CircuitBreaker.State.valueOf(message)) {
+            when (state) {
                 CircuitBreaker.State.OPEN -> {
                     log.info("=== CIRCUIT BREAKER IS NOW OPEN ===")
                     circuitBreakerCached.transitionToForcedOpenState()
@@ -90,8 +95,12 @@ class CachedCircuitBreakerComponent(
             }
         }
 
-        override fun onSubscribe(channel: String?, subscribedChannels: Int) {
-            log.info("Me inscrevi no $channel e ae?")
+        override fun onSubscribe(channel: String, subscribedChannels: Int) {
+            val state = redisPool.get(CIRCUIT_BREAKER_CHANNEL) ?: return
+
+            if (state == CircuitBreaker.State.OPEN.name) {
+                circuitBreakerCached.transitionToForcedOpenState()
+            }
         }
     }
 }

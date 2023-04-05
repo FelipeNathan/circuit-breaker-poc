@@ -9,13 +9,13 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.time.toJavaDuration
 
 @Configuration
-class CircuitBreakerComponent {
+class CircuitBreakerConfiguration {
 
     @Bean
     fun circuitBreakerConfig() = CircuitBreakerConfig.custom()
         .slidingWindowSize(2)
         .minimumNumberOfCalls(2)
-        .automaticTransitionFromOpenToHalfOpenEnabled(true)
+        .enableAutomaticTransitionFromOpenToHalfOpen()
         .waitDurationInOpenState(30.seconds.toJavaDuration())
         .build()
 
