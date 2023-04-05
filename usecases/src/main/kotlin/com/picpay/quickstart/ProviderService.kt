@@ -6,12 +6,12 @@ import org.springframework.stereotype.Service
 @Service
 class ProviderService {
 
-    fun disable() = log.info(
-        "\n=== CALL EVENT TO DISABLE PROVIDER === "
+    fun disable(origin: String) = log.info(
+        "\n=== CALL EVENT TO DISABLE PROVIDER FOR ORIGIN $origin=== "
     )
 
-    fun enable() = log.info(
-        "\n=== CALL EVENT TO ENABLE PROVIDER ==="
+    fun enable(origin: String) = log.info(
+        "\n=== CALL EVENT TO ENABLE PROVIDER FOR ORIGIN $origin==="
     )
 
     companion object {
