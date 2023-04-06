@@ -1,160 +1,95 @@
 # circuit-breaker-poc
 
-Para iniciar um novo projeto a partir deste quick-start é necessário:
-
-- Cloná-lo na máquina.
-- Excluir a pasta do `.git` (ele fica oculto, necessário desocultar).
-- Alterar os diretórios que têm o nome de `quickstart` para o nome do projeto.
-- No arquivo `Jenkinsfile` (re)definir o nome dos atributos `serviceNamespace` e `jobName`.
-- No arquivo `sonar.properties` definir o caminho das pastas dos atributos `sonar.junit.reportPaths` e `sonar.coverage.jacoco.xmlReportPaths`.
-- Alterar tudo o que encontrar (Edit -> Find -> Replace in path) como `quickstart` de configuração para o nome do projeto.
-
-Para configurar o banco:
-
-- Substituir nos arquivos de configuração de `dbName` e `dbUrl` para o nome do BD e URL de acesso.
-- Será utilizado o `application.properties` para configuração local e `deployment.yml` para produção.
-
-Repositório git do novo projeto:
-
-- Entrar na pasta do projeto via terminal e seguir os passos abaixo:
-
-```
-git init
-git add .
-git commit -am "Versao inicial"
-git remote add origin URL_REPOSITORIO
-git remote -v
-git push origin master
-```
-
-Obs: `git remote -v` (usado apenas para verificar se a URL está correta).
-
-Para configurar sua aplicação no orquestrador:
-
-- Siga estes passo: https://guiabolso.atlassian.net/wiki/spaces/ENH/pages/1360855041/Configurando+sua+aplica+o
-
-Para configurar o job de continuous integration:
-
-- Siga os passos descritos na documentação aqui: https://guiabolso.atlassian.net/wiki/spaces/ENH/pages/1292926986/Criando+novo+pipeline+de+deploy
-- Você precisará configurar o seu `Jenkinsfile` de acordo, veja exemplos para o pipeline padrão: https://guiabolso.atlassian.net/wiki/spaces/ENH/pages/1293058103/ciKubernetesDeploy#Exemplos
-
-Estrutura do projeto
-
-- A aplicação é dividida basicamente em quatro pacotes: usecases, persistence, events e http-api.
-
-Usecases:
-
-- Esse pacote é onde fica as regras de negócio da aplicação.
-- Ele deve ser independente, enxergando apenas ele mesmo e disponibilizando interfaces para outros pacotes
-  implementarem.
-
-Persistence:
-
-- Contém todas as entities do projeto.
-- Implementa as interfaces da pasta repository do usecases.
-- Essa implementação é usada para converter o model do usecases para a entity do banco de dados.
-- Ele contém as configurações do banco de dados.
-
-Events:
-
-- Define as APIs tanto do próprio projeto quanto dos parceiros.
-- Utiliza nossa biblioteca de comunicações ([Protocolo de Eventos](https://github.com/GuiaBolso/events-protocol)).
-
-Http-api:
-
-- Contém todas as configurações de API.
-- Define o framework HTTP usado para expor as APIs.
-
 ### Bibliotecas e frameworks
+- Redis (https://github.com/redis/jedis)
+- Resilience4j Circuit Breaker (https://resilience4j.readme.io/docs/circuitbreaker) 
 
-Se estiver na dúvida sobre quais utilizar para codar sua aplicação, uma boa referência é
-o [Guiabolso Tech Radar](https://guiabolso.github.io/tech-radar/).
+## Docker
+- Este Dockerfile foi alterado para apenas copiar a pasta `application-1.0` que será gerado no `root` ao executar o makefile
 
-## Logging:
+## Makefile
+- Para auxiliar no processo de build, criei o makefile com as tasks `clean`, `build-project`, `extract`, `build-image` e as tarefas agrupadas `run` e `run-build-image`
+1. `clean`: remove a pasta `application-1.0` do root
+2. `build-project`: "rebuilda" o projeto com `clean build` (ignorando testes, é apenas uma poc, relaxa)
+3. `extract`: extrai a pasta `application-1.0` de `./application/build/distributions/application-1.0.tar` pro `root`
+4. `build-image`: cria a imagem da aplicação chamada `myapp`
+5. `run`: executa os passos 1, 2 e 3
+6. `run-build-image`: executa o passo 5 e 4
 
-Mensagens de log, ao seguirem este padrão, estarão em formato JSON.
-
-Por isto é necessário incluir na aplicação a seguinte configuração
-de [logback.xml](usecases/src/main/resources/logback.xml) e instalar as dependências necessárias (
-ver [Logstash Logback Encoder](https://github.com/logstash/logstash-logback-encoder)).
-
-Também é possível instalá-las via gradle:
+## Usage
+- Só buildar e subir no docker compose que tem 3 instancias do app nas portas 8080, 8081 e 8082 (foi mais rapido assim do que criar um k8s local, etc)
 
 ```
-dependencies {
-    //...Suas dependências
-    implementation group: 'net.logstash.logback', name:'logstash-logback-encoder', version:'6.1'
-    implementation group: 'ch.qos.logback', name:'logback-classic', version: '1.2.3'
+$ make run-build-image
+$ docker compose up 
+```
+
+## Events
+- Evento `circuit:breaker:V1`
+- Payload: throwException: true|false (Simular alguma falha pra abrir o circuito)
+```json
+{
+  "throwException":true|false
+}
+```
+- Metadata: Origin PFM|PNP (opcional, em caso de não passar ou passar incorreto, será usado um circuito "Default")
+```json
+{
+  "metadata": {
+    "origin": "PNP"
+  }
 }
 ```
 
-O arquivo [LoggerExtension.kt](usecases/src/main/kotlin/br/com/guiabolso/quickstart/misc/logging/LoggerExtension.kt)
-possui funções de extensão aplicadas a um Logger do Logback para facilitar o trabalho com MDC com propriedades variáveis
-e fixas, mas seu uso é opcional (desde que o log final esteja em JSON seguindo a configuração do logback.xml)
-
-O Encoder utilizado para isto é o [Logstash Logback Encoder](https://github.com/logstash/logstash-logback-encoder). A
-configuração básica está pronta no arquivo [logback.xml](usecases/src/main/resources/logback.xml) e recomenda-se
-fortemente não **alterar** o que já está lá, ainda que seja plenamente viável **adicionar** mais atributos para logging
-em caso isto seja necessário.
-
-É importante ater-se ao fato de que **tudo** o que estiver no MDC será traduzido para **String** no log JSON, pois o
-encoder respeita o tipo de dados presente no atributo (que, no caso do MDC, só é possível adicionar propriedades tipo
-String), mas é possível mudar este comportamento com alguma configuração extra que pode (e deve) ser adicionada por
-aplicação, desta maneira:
-
-Mudar esta linha
-
-```
-  <mdc />
-```
-
-Para:
-
-```
-  <mdc>
-      <excludeMdcKeyName>nomeDoAtributoNoMDC</excludeMdcKeyName>
-  </mdc>
+## Exemplo
+- Evento que será executado no circuit breaker de PNP e **não** lançará exceção, o circuito **não** abrirá
+```json
+{
+  "name": "circuit:breaker",
+  "version": 1,
+  "id": "ui-id",
+  "flowId": "ui-id",
+  "payload": {
+    "throwException":false
+  },	  
+  "identity": {},	  
+  "auth": {},	  
+  "metadata": {
+    "origin": "PNP"
+  }
+}
 ```
 
-E acrescentá-lo mais a diante, alterando este trecho:
-
-```
-    <pattern>
-        <omitEmptyFields>true</omitEmptyFields>
-        <!-- the pattern that defines what to include -->
-        <pattern />
-    </pattern>
-```
-
-Para:
-
-```
-    <pattern>
-        <omitEmptyFields>true</omitEmptyFields>
-        <!-- the pattern that defines what to include -->
-        <pattern>
-        {
-            "nomedoCampoNoLog": "#asLong{%mdc{nomeDoAtributoNoMDC}}",
-        }
-        </pattern>
-    </pattern>
+- Evento que será executado no circuit breaker de PFM e **lançará** exceção, o circuito **abrirá** após ter 50% de 4 requisições com falha
+```json
+{	  
+  "name": "circuit:breaker",	  
+  "version": 1,	  
+  "id": "ui-id",	  
+  "flowId": "ui-id",	  
+  "payload": {	    
+    "throwException":true
+  },	  
+  "identity": {},	  
+  "auth": {},	  
+  "metadata": {	    
+    "origin": "PFM"
+  }
+}
 ```
 
-Para mais informações, ler
-sobre [Composite Encoder Layout](https://github.com/logstash/logstash-logback-encoder#composite-encoderlayout)
-
-## Docker
-
-- A imagem base que está no configurada no Dockerfile do projeto já possui um agent do Datadog instalado. Essa imagem é
-  privada e criada pelo próprio Guiabolso, portanto, ao atualizar a versão do Datadog verifique (no Dockerhub) se já
-  existe uma imagem base com a versão do Datadog que você queira utilizar.
-- O projeto possui uma [task gradle](build.gradle) que cria o Dockerfile, que por sua vez é executado
-  pelo [Jenkinsfile](jenkinsfiles/build_project.groovy) no momento do deploy. Se for de sua preferência, é possível
-  utilizar um Dockerfile fixo na raiz do projeto, para isso, remova a task de criação do dockerfile e remova a chamada
-  dessa task no [Jenkinsfile](jenkinsfiles/build_project.groovy).
-
-Obs: o nome arquivo docker deve ser exatamente **`Dockerfile`**.
-
-# README
-
-Utilizar o template disponível neste repositório [README_TEMPLATE.md](README_TEMPLATE.md).
+- Evento que será executado no circuit breaker Default
+```json
+{
+  "name": "circuit:breaker",
+  "version": 1,
+  "id": "ui-id",
+  "flowId": "ui-id",
+  "payload": {
+    "throwException":true
+  },
+  "identity": {},
+  "auth": {},
+  "metadata": {} // não contém origin
+}
+```
